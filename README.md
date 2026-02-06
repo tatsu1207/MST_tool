@@ -48,6 +48,19 @@ conda activate dada2_mst
 
 The `fastq_dir` should contain paired FASTQ files named `sample_R1.fastq.gz` / `sample_R2.fastq.gz` (or `sample_1.fastq.gz` / `sample_2.fastq.gz`).
 
+### Input Data Requirements
+
+The pipeline accepts V3-V4 region paired-end MiSeq data. The reference database uses the V4 region, so V4 is extracted from your input reads.
+
+**Primer handling:**
+- **R1**: Must contain the V4 forward primer (515F: `GTGYCAGCMGCCGCGGTAA`). The script searches for this primer and keeps everything after it.
+- **R2**: Can have primers intact OR already removed:
+  - If 806R primer (`GACTACNVGGGTWTCTAAT`) is found → trimmed automatically
+  - If 806R primer is not found → assumes primers were already removed and uses R2 as-is
+  - R2 is truncated to 150bp in both cases
+
+This flexibility allows the tool to work with both raw amplicon data (primers intact) and pre-processed data (primers already trimmed).
+
 ### Streamlit GUI
 
 ```bash
@@ -58,7 +71,7 @@ Opens a web interface at http://localhost:8501 where you can upload FASTQ files,
 
 ## Pipeline Steps
 
-1. **V4 Extraction** - Extracts V4 region from V3-V4 amplicons using primer search (515F/806R)
+1. **V4 Extraction** - Extracts V4 region from V3-V4 amplicons using primer search (515F/806R). Handles both primer-intact and primer-trimmed input data.
 2. **DADA2 Processing** - Filters, denoises, merges reads, and removes chimeras using pre-computed error rates
 3. **ASV Mapping** - Maps sink ASVs to the reference database by exact sequence match
 4. **Feature Table** - Creates combined source + sink abundance table with rare ASV filtering

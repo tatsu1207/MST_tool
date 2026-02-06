@@ -10,7 +10,8 @@ R1 logic:
 
 R2 logic:
     [806R] [V4 ─── keep this ───]
-    → trim 806R from 5' end
+    → trim 806R from 5' end if found
+    → if 806R not found, assume primers were already removed and use R2 as-is
     → truncate to 150bp
 
 Default primers:
@@ -169,13 +170,17 @@ def main():
                 continue
 
             # ── R2: find 806R near 5' end, trim it, then truncate to r2_trunc bp ──
+            # If primer not found, assume primers were already removed and use R2 as-is
             pos_rv = find_primer(s2, rv, args.mismatches, search_range=args.r2_rv_window)
             if pos_rv < 0:
+                # Primer not found - assume already trimmed, use R2 as-is
                 r2_no_rv += 1
-                continue
-            trim_start_r2 = pos_rv + len(rv)
-            s2_trimmed = s2[trim_start_r2:]
-            q2_trimmed = q2[trim_start_r2:]
+                s2_trimmed = s2
+                q2_trimmed = q2
+            else:
+                trim_start_r2 = pos_rv + len(rv)
+                s2_trimmed = s2[trim_start_r2:]
+                q2_trimmed = q2[trim_start_r2:]
 
             # ── R2: truncate to specified length ──
             s2_out = s2_trimmed[:r2_trunc]
@@ -195,18 +200,18 @@ def main():
 
     elapsed = time.time() - t0
 
-    log.info("─" * 54)
+    log.info("─" * 58)
     log.info(f"  Total pairs processed       : {total:>10,}")
     log.info(f"  R1 — 515F not found         : {r1_no_fw:>10,}  ({r1_no_fw/total*100:5.2f}%)")
     log.info(f"  R1 — empty after trim       : {r1_empty:>10,}  ({r1_empty/total*100:5.2f}%)")
-    log.info(f"  R2 — 806R not found (5')    : {r2_no_rv:>10,}  ({r2_no_rv/total*100:5.2f}%)")
+    log.info(f"  R2 — 806R not found (5')    : {r2_no_rv:>10,}  ({r2_no_rv/total*100:5.2f}%)  (used as-is)")
     log.info(f"  R2 — empty after trim       : {r2_empty:>10,}  ({r2_empty/total*100:5.2f}%)")
     log.info(f"  R2 — truncated to           : {r2_trunc:>10,} bp")
     log.info(f"  Pairs kept                  : {kept:>10,}  ({kept/total*100:5.2f}%)")
     log.info(f"  Output                      : {out_r1}")
     log.info(f"                                {out_r2}")
     log.info(f"  Elapsed                     : {elapsed:>9.1f} s")
-    log.info("─" * 54)
+    log.info("─" * 58)
 
 
 if __name__ == "__main__":
