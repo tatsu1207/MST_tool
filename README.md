@@ -42,8 +42,8 @@ conda activate dada2_mst
 # All source categories
 ./run_sourcetracker.sh <fastq_dir> [output_dir]
 
-# Specific source categories only
-./run_sourcetracker.sh <fastq_dir> [output_dir] "human,cow,pig"
+# Specific source categories only (available sources:human,cow,pig,duck,chicken,groundwater,river,seawater )
+./run_sourcetracker.sh <fastq_dir> [output_dir] "human,cow,pig,duck,chicken,river" 
 ```
 
 The `fastq_dir` should contain paired FASTQ files named `sample_R1.fastq.gz` / `sample_R2.fastq.gz` (or `sample_1.fastq.gz` / `sample_2.fastq.gz`).
