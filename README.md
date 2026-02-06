@@ -39,84 +39,35 @@ This creates a conda environment `dada2_mst` with all dependencies (DADA2, Sourc
 ```bash
 conda activate dada2_mst
 
-# All source categories (default: V3-V4 amplicons)
+# All source categories
 ./run_sourcetracker.sh <fastq_dir> [output_dir]
 
-# Specific source categories only (available sources: human,cow,pig,duck,chicken,groundwater,river,seawater)
-./run_sourcetracker.sh <fastq_dir> [output_dir] "human,cow,pig,duck,chicken,river"
-
-# Specify amplicon type (v4, v34, or v45)
-./run_sourcetracker.sh <fastq_dir> [output_dir] "all" v4      # V4 only amplicons
-./run_sourcetracker.sh <fastq_dir> [output_dir] "all" v34     # V3-V4 amplicons (default)
-./run_sourcetracker.sh <fastq_dir> [output_dir] "all" v45     # V4-V5 amplicons
-
-# Learn error rates from input data (slower but more accurate for different sequencing runs)
-./run_sourcetracker.sh <fastq_dir> [output_dir] "all" v34 learn
+# Specific source categories only (available sources:human,cow,pig,duck,chicken,groundwater,river,seawater )
+./run_sourcetracker.sh <fastq_dir> [output_dir] "human,cow,pig,duck,chicken,river" 
 ```
 
 The `fastq_dir` should contain paired FASTQ files named `sample_R1.fastq.gz` / `sample_R2.fastq.gz` (or `sample_1.fastq.gz` / `sample_2.fastq.gz`).
 
 ### Input Data Requirements
 
-The pipeline accepts paired-end MiSeq 16S rRNA amplicon data. The reference database uses the V4 region, so V4 is extracted from your input reads.
+The pipeline accepts V3-V4 region paired-end MiSeq data. The reference database uses the V4 region, so V4 is extracted from your input reads.
 
-**Supported amplicon types:**
-
-| Type | Description | R1 Contains | R2 Contains |
-|------|-------------|-------------|-------------|
-| `v34` | V3-V4 (default) | V3 + 515F + V4 | 806R + V4 |
-| `v4` | V4 only | 515F + V4 | 806R + V4 |
-| `v45` | V4-V5 | 515F + V4 + V5 | 926R + V5 |
-
-**Primer handling by amplicon type:**
-
-- **V3-V4 (`v34`)**:
-  - R1: Searches for 515F anywhere (required to locate V4 start)
-  - R2: Trims 806R if found, uses as-is if not found
-
-- **V4 (`v4`)**:
-  - R1: Searches for 515F at start, uses as-is if not found (primers may be pre-trimmed)
-  - R2: Trims 806R if found, uses as-is if not found
-
-- **V4-V5 (`v45`)**:
-  - R1: Searches for 515F at start, uses as-is if not found
-  - R2: Contains V5 region (not V4), used as-is with warning
-  - ⚠️ Limited support: R2 won't match V4 database well
-
-**Default primers:**
-- 515F (V4 forward): `GTGYCAGCMGCCGCGGTAA`
-- 806R (V4 reverse): `GACTACNVGGGTWTCTAAT`
+**Primer handling:**
+- **R1**: Must contain the V4 forward primer (515F: `GTGYCAGCMGCCGCGGTAA`). The script searches for this primer and keeps everything after it.
+- **R2**: Can have primers intact OR already removed:
+  - If 806R primer (`GACTACNVGGGTWTCTAAT`) is found → trimmed automatically
+  - If 806R primer is not found → assumes primers were already removed and uses R2 as-is
+  - R2 is truncated to 150bp in both cases
 
 This flexibility allows the tool to work with both raw amplicon data (primers intact) and pre-processed data (primers already trimmed).
 
-**DADA2 Error Rates:**
-
-The pipeline offers two options for DADA2 error rate estimation:
-
-| Option | Speed | When to Use |
-|--------|-------|-------------|
-| Pre-computed (default) | Fast | Data from similar sequencing runs as the reference database |
-| Learn from input | Slow | Data from different sequencing platforms or runs |
-
-The pre-computed error rates were generated from V3-V4 amplicon data. For V4-only or V4-V5 data, or data from different sequencing runs, consider using the "learn" option for better accuracy.
-
 ### Streamlit GUI
 
-**Windows (double-click):**
-- Double-click `Launch_MST_GUI.bat` to start the GUI
-- Or run `Create_Desktop_Shortcut.bat` once to add a shortcut to your desktop
-
-**Linux/WSL terminal:**
 ```bash
 ./run_app.sh
 ```
 
-Opens a web interface at http://localhost:8501 where you can:
-- Upload FASTQ files
-- Select amplicon type (V4, V3-V4, or V4-V5)
-- Choose to learn error rates from input data (slower but more accurate)
-- Choose source categories
-- Visualize results
+Opens a web interface at http://localhost:8501 where you can upload FASTQ files, select source categories, and visualize results.
 
 ## Pipeline Steps
 
@@ -140,14 +91,12 @@ The `db/` directory contains the reference source database:
 ## File Structure
 
 ```
-├── setup.sh                    # Environment setup script
-├── run_sourcetracker.sh        # CLI pipeline
-├── run_app.sh                  # Streamlit GUI launcher (Linux/WSL)
-├── Launch_MST_GUI.bat          # Streamlit GUI launcher (Windows double-click)
-├── Create_Desktop_Shortcut.bat # Creates desktop shortcut (Windows)
-├── app.py                      # Streamlit application
-├── requirements.txt            # Python pip dependencies
+├── setup.sh              # Environment setup script
+├── run_sourcetracker.sh  # CLI pipeline
+├── run_app.sh            # Streamlit GUI launcher
+├── app.py                # Streamlit application
+├── requirements.txt      # Python pip dependencies
 ├── scripts/
-│   └── get_v4_from_v34.py      # V4 region extraction
-└── db/                         # Reference database
+│   └── get_v4_from_v34.py  # V4 region extraction
+└── db/                   # Reference database
 ```
