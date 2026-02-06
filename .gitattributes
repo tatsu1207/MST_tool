@@ -1,0 +1,12 @@
+# Force LF line endings for all text files (critical for WSL/Linux)
+* text=auto eol=lf
+
+# Ensure shell scripts always use LF
+*.sh text eol=lf
+
+# Binary files
+*.gz binary
+*.rds binary
+
+# FASTA is text but don't mess with line endings
+*.fasta text eol=lf
