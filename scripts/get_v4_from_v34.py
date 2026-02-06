@@ -4,22 +4,23 @@ extract_v4.py
 -------------
 Extract V4 region from paired-end MiSeq data by primer-based trimming.
 
-R1 logic:
-    [... anything ...] [515F] [V4 ─── keep this ───>]
-    → search for 515F anywhere in R1, remove everything up to and including it.
+Supports three amplicon types:
+    v34 (V3-V4):  R1=[V3][515F][V4]  R2=[806R][V4]
+    v4  (V4):     R1=[515F][V4]      R2=[806R][V4]
+    v45 (V4-V5):  R1=[515F][V4][V5]  R2=[926R][V5] (R2 not usable for V4 DB)
 
-R2 logic:
-    [806R] [V4 ─── keep this ───]
-    → trim 806R from 5' end
-    → truncate to 150bp
+Logic by amplicon type:
+    v34: Find 515F anywhere in R1 (required), trim 806R from R2 if found
+    v4:  Find 515F at start of R1 (optional), trim 806R from R2 if found
+    v45: Find 515F at start of R1 (optional), R2 is V5 so use as-is (warning)
 
 Default primers:
     515F          GTGYCAGCMGCCGCGGTAA      (19 bp)
     806R          GACTACNVGGGTWTCTAAT      (19 bp)
 
 Usage:
-    python extract_v4.py SAMPLE_NAME out_dir
-    python extract_v4.py SAMPLE_NAME out_dir --mismatches 3
+    python extract_v4.py SAMPLE_NAME out_dir --amplicon v34
+    python extract_v4.py SAMPLE_NAME out_dir --amplicon v4 --mismatches 3
 
     Input  : ./SAMPLE_NAME_R1.fastq.gz  ./SAMPLE_NAME_R2.fastq.gz
     Output : out_dir/SAMPLE_NAME_trimmed_R1.fastq.gz  ...trimmed_R2.fastq.gz
@@ -117,6 +118,8 @@ def main():
                         help="Search window for 806R on R2 5' end (default: 30 bp)")
     parser.add_argument("--r2-trunc-len",  type=int, default=R2_TRUNC_LEN,
                         help=f"Truncate R2 to this length after primer removal (default: {R2_TRUNC_LEN} bp)")
+    parser.add_argument("--amplicon",      choices=["v4", "v34", "v45"], default="v34",
+                        help="Amplicon type: v4 (V4 only), v34 (V3-V4), v45 (V4-V5) (default: v34)")
 
     args = parser.parse_args()
 
@@ -134,13 +137,20 @@ def main():
     rv      = args.rv
     r2_trunc = args.r2_trunc_len
 
+    amplicon = args.amplicon
+
     log.info(f"Sample            : {args.sample}")
+    log.info(f"Amplicon type     : {amplicon.upper()}")
     log.info(f"V4 FW primer      : {fw}  ({len(fw)} bp)")
     log.info(f"V4 RV primer      : {rv}  ({len(rv)} bp)")
     log.info(f"Max mismatches    : {args.mismatches}")
     log.info(f"R2 806R window    : {args.r2_rv_window} bp")
     log.info(f"R2 truncate len   : {r2_trunc} bp")
     log.info(f"Input             : {r1_path}  /  {r2_path}")
+
+    if amplicon == "v45":
+        log.warning("V4-V5 amplicons: R2 contains V5 region which won't match V4 database.")
+        log.warning("Consider using single-end mode or a V4-V5 compatible database.")
 
     out_r1 = os.path.join(args.outdir, f"{args.sample}_trimmed_R1.fastq.gz")
     out_r2 = os.path.join(args.outdir, f"{args.sample}_trimmed_R2.fastq.gz")
@@ -156,26 +166,53 @@ def main():
         for (h1, s1, q1), (h2, s2, q2) in zip(iter_fastq(fh1), iter_fastq(fh2)):
             total += 1
 
-            # ── R1: find 515F anywhere, keep everything after it ──
-            pos_fw = find_primer(s1, fw, args.mismatches)
-            if pos_fw < 0:
-                r1_no_fw += 1
-                continue
-            trim_start_r1 = pos_fw + len(fw)
-            s1_out = s1[trim_start_r1:]
-            q1_out = q1[trim_start_r1:]
+            # ── R1 processing depends on amplicon type ──
+            if amplicon == "v34":
+                # V3-V4: 515F is in the middle of R1, search anywhere (required)
+                pos_fw = find_primer(s1, fw, args.mismatches)
+                if pos_fw < 0:
+                    r1_no_fw += 1
+                    continue
+                trim_start_r1 = pos_fw + len(fw)
+                s1_out = s1[trim_start_r1:]
+                q1_out = q1[trim_start_r1:]
+            else:
+                # V4 or V4-V5: 515F should be at start of R1 (optional)
+                pos_fw = find_primer(s1, fw, args.mismatches, search_range=args.r2_rv_window)
+                if pos_fw < 0:
+                    # Primer not found - assume already trimmed, use R1 as-is
+                    r1_no_fw += 1
+                    s1_out = s1
+                    q1_out = q1
+                else:
+                    trim_start_r1 = pos_fw + len(fw)
+                    s1_out = s1[trim_start_r1:]
+                    q1_out = q1[trim_start_r1:]
+
             if not s1_out:
                 r1_empty += 1
                 continue
 
-            # ── R2: find 806R near 5' end, trim it, then truncate to r2_trunc bp ──
-            pos_rv = find_primer(s2, rv, args.mismatches, search_range=args.r2_rv_window)
-            if pos_rv < 0:
+            # ── R2 processing depends on amplicon type ──
+            if amplicon == "v45":
+                # V4-V5: R2 contains V5 region, not useful for V4 database
+                # Just use as-is and truncate (user was warned)
                 r2_no_rv += 1
-                continue
-            trim_start_r2 = pos_rv + len(rv)
-            s2_trimmed = s2[trim_start_r2:]
-            q2_trimmed = q2[trim_start_r2:]
+                s2_trimmed = s2
+                q2_trimmed = q2
+            else:
+                # V4 or V3-V4: find 806R near 5' end, trim it if found
+                # If primer not found, assume primers were already removed and use R2 as-is
+                pos_rv = find_primer(s2, rv, args.mismatches, search_range=args.r2_rv_window)
+                if pos_rv < 0:
+                    # Primer not found - assume already trimmed, use R2 as-is
+                    r2_no_rv += 1
+                    s2_trimmed = s2
+                    q2_trimmed = q2
+                else:
+                    trim_start_r2 = pos_rv + len(rv)
+                    s2_trimmed = s2[trim_start_r2:]
+                    q2_trimmed = q2[trim_start_r2:]
 
             # ── R2: truncate to specified length ──
             s2_out = s2_trimmed[:r2_trunc]
@@ -195,18 +232,25 @@ def main():
 
     elapsed = time.time() - t0
 
-    log.info("─" * 54)
+    log.info("─" * 62)
+    log.info(f"  Amplicon type               : {amplicon.upper()}")
     log.info(f"  Total pairs processed       : {total:>10,}")
-    log.info(f"  R1 — 515F not found         : {r1_no_fw:>10,}  ({r1_no_fw/total*100:5.2f}%)")
+    if amplicon == "v34":
+        log.info(f"  R1 — 515F not found         : {r1_no_fw:>10,}  ({r1_no_fw/total*100:5.2f}%)  (skipped)")
+    else:
+        log.info(f"  R1 — 515F not found         : {r1_no_fw:>10,}  ({r1_no_fw/total*100:5.2f}%)  (used as-is)")
     log.info(f"  R1 — empty after trim       : {r1_empty:>10,}  ({r1_empty/total*100:5.2f}%)")
-    log.info(f"  R2 — 806R not found (5')    : {r2_no_rv:>10,}  ({r2_no_rv/total*100:5.2f}%)")
+    if amplicon == "v45":
+        log.info(f"  R2 — V5 region              : {r2_no_rv:>10,}  (100.00%)  (used as-is)")
+    else:
+        log.info(f"  R2 — 806R not found (5')    : {r2_no_rv:>10,}  ({r2_no_rv/total*100:5.2f}%)  (used as-is)")
     log.info(f"  R2 — empty after trim       : {r2_empty:>10,}  ({r2_empty/total*100:5.2f}%)")
     log.info(f"  R2 — truncated to           : {r2_trunc:>10,} bp")
     log.info(f"  Pairs kept                  : {kept:>10,}  ({kept/total*100:5.2f}%)")
     log.info(f"  Output                      : {out_r1}")
     log.info(f"                                {out_r2}")
     log.info(f"  Elapsed                     : {elapsed:>9.1f} s")
-    log.info("─" * 54)
+    log.info("─" * 62)
 
 
 if __name__ == "__main__":

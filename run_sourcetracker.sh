@@ -1,14 +1,18 @@
 #!/bin/bash
 
 # SourceTracker2 Pipeline Script
-# Usage: ./run_sourcetracker.sh <fastq_dir> [output_dir] [sources]
+# Usage: ./run_sourcetracker.sh <fastq_dir> [output_dir] [sources] [amplicon] [learn_errors]
 #
 # Arguments:
-#   fastq_dir  - Directory containing paired FASTQ files (required)
-#                Files should be named: sample_R1.fastq.gz / sample_R2.fastq.gz
-#   output_dir - Output directory (optional, default: ./st2_output)
-#   sources    - Comma-separated source categories to include (optional, default: all)
-#                e.g. "human,cow,pig" or "human,chicken,seawater"
+#   fastq_dir    - Directory containing paired FASTQ files (required)
+#                  Files should be named: sample_R1.fastq.gz / sample_R2.fastq.gz
+#   output_dir   - Output directory (optional, default: ./st2_output)
+#   sources      - Comma-separated source categories to include (optional, default: all)
+#                  e.g. "human,cow,pig" or "human,chicken,seawater"
+#   amplicon     - Amplicon type: v4, v34, v45 (optional, default: v34)
+#                  v34 = V3-V4 region, v4 = V4 only, v45 = V4-V5 region
+#   learn_errors - Set to "learn" to learn error rates from input data (optional, default: use pre-computed)
+#                  Use this for data from different sequencing runs (slower but more accurate)
 
 set -e
 
@@ -16,17 +20,38 @@ set -e
 FASTQ_DIR="$1"
 OUTPUT_DIR="${2:-./st2_output}"
 SOURCES="${3:-all}"
+AMPLICON="${4:-v34}"
+LEARN_ERRORS="${5:-precomputed}"
 
 # Validate arguments
 if [ -z "$FASTQ_DIR" ]; then
-    echo "Usage: $0 <fastq_dir> [output_dir] [sources]"
+    echo "Usage: $0 <fastq_dir> [output_dir] [sources] [amplicon] [learn_errors]"
     echo ""
     echo "Arguments:"
-    echo "  fastq_dir  - Directory containing paired FASTQ files (required)"
-    echo "               Files should be named: sample_R1.fastq.gz / sample_R2.fastq.gz"
-    echo "  output_dir - Output directory (optional, default: ./st2_output)"
-    echo "  sources    - Comma-separated source categories (optional, default: all)"
-    echo "               e.g. \"human,cow,pig\""
+    echo "  fastq_dir    - Directory containing paired FASTQ files (required)"
+    echo "                 Files should be named: sample_R1.fastq.gz / sample_R2.fastq.gz"
+    echo "  output_dir   - Output directory (optional, default: ./st2_output)"
+    echo "  sources      - Comma-separated source categories (optional, default: all)"
+    echo "                 e.g. \"human,cow,pig\""
+    echo "  amplicon     - Amplicon type: v4, v34, v45 (optional, default: v34)"
+    echo "                 v34 = V3-V4 region (primers in middle of R1)"
+    echo "                 v4  = V4 only (primers at start of reads)"
+    echo "                 v45 = V4-V5 region (R2 contains V5, limited support)"
+    echo "  learn_errors - Error rate handling (optional, default: precomputed)"
+    echo "                 precomputed = Use pre-computed error rates (fast)"
+    echo "                 learn       = Learn from input data (slow but more accurate)"
+    exit 1
+fi
+
+# Validate amplicon type
+if [[ ! "$AMPLICON" =~ ^(v4|v34|v45)$ ]]; then
+    echo "Error: Invalid amplicon type '$AMPLICON'. Must be v4, v34, or v45."
+    exit 1
+fi
+
+# Validate learn_errors option
+if [[ ! "$LEARN_ERRORS" =~ ^(precomputed|learn)$ ]]; then
+    echo "Error: Invalid learn_errors option '$LEARN_ERRORS'. Must be 'precomputed' or 'learn'."
     exit 1
 fi
 
@@ -108,13 +133,64 @@ for S in "${SAMPLE_NAMES[@]}"; do
 done
 echo "Output directory: $OUTPUT_DIR"
 echo "Sources: $SOURCES"
-echo "Error rates: pre-computed"
+echo "Amplicon type: $AMPLICON"
+if [ "$LEARN_ERRORS" = "learn" ]; then
+    echo "Error rates: learn from input (slow)"
+else
+    echo "Error rates: pre-computed (fast)"
+fi
 echo "========================================"
+
+if [ "$AMPLICON" = "v45" ]; then
+    echo ""
+    echo "WARNING: V4-V5 amplicons - R2 contains V5 region which may not match V4 database well."
+    echo ""
+fi
+
+if [ "$LEARN_ERRORS" = "learn" ]; then
+    echo ""
+    echo "NOTE: Learning error rates from input data. This will be significantly slower."
+    echo ""
+fi
+
+# Find and initialize conda
+init_conda() {
+    # Common conda installation paths
+    local conda_paths=(
+        "$HOME/miniforge"
+        "$HOME/miniforge3"
+        "$HOME/mambaforge"
+        "$HOME/miniconda3"
+        "$HOME/miniconda"
+        "$HOME/anaconda3"
+        "/opt/conda"
+        "/opt/miniforge3"
+    )
+
+    for conda_base in "${conda_paths[@]}"; do
+        if [ -f "$conda_base/etc/profile.d/conda.sh" ]; then
+            source "$conda_base/etc/profile.d/conda.sh"
+            return 0
+        fi
+    done
+
+    # Try using conda info if conda is in PATH
+    if command -v conda &> /dev/null; then
+        source "$(conda info --base)/etc/profile.d/conda.sh"
+        return 0
+    fi
+
+    echo "Error: Could not find conda installation."
+    echo "Please ensure Miniforge/Miniconda is installed."
+    return 1
+}
 
 # Activate conda environment
 echo ""
 echo "[Step 1/6] Activating conda environment..."
-source "$(conda info --base)/etc/profile.d/conda.sh"
+if ! init_conda; then
+    exit 1
+fi
 conda activate dada2_mst
 
 # V4 extraction script
@@ -154,7 +230,7 @@ for IDX in "${!R1_FILES[@]}"; do
         cp -f "$R2_ABS" "$WORK_DIR/${SAMPLE_NAME}_R2.fastq.gz"
 
     cd "$WORK_DIR"
-    python3 "$V4_EXTRACT_SCRIPT" "$SAMPLE_NAME" "$TRIMMED_DIR" --mismatches 2
+    python3 "$V4_EXTRACT_SCRIPT" "$SAMPLE_NAME" "$TRIMMED_DIR" --mismatches 2 --amplicon "$AMPLICON"
     cd - > /dev/null
 
     TRIMMED_R1="$TRIMMED_DIR/${SAMPLE_NAME}_trimmed_R1.fastq.gz"
@@ -169,9 +245,13 @@ for IDX in "${!R1_FILES[@]}"; do
 
     # Step 3: Process with DADA2
     echo ""
-    echo "[Step 3/6] Processing $SAMPLE_NAME with DADA2..."
+    if [ "$LEARN_ERRORS" = "learn" ]; then
+        echo "[Step 3/6] Processing $SAMPLE_NAME with DADA2 (learning error rates - this will be slow)..."
+    else
+        echo "[Step 3/6] Processing $SAMPLE_NAME with DADA2..."
+    fi
 
-    Rscript --vanilla - "$TRIMMED_R1" "$TRIMMED_R2" "$OUTPUT_DIR" "$SAMPLE_NAME" "$DB_FASTA" "$ERR_F_FILE" "$ERR_R_FILE" << 'RSCRIPT'
+    Rscript --vanilla - "$TRIMMED_R1" "$TRIMMED_R2" "$OUTPUT_DIR" "$SAMPLE_NAME" "$DB_FASTA" "$ERR_F_FILE" "$ERR_R_FILE" "$LEARN_ERRORS" << 'RSCRIPT'
 args <- commandArgs(trailingOnly = TRUE)
 r1_file <- args[1]
 r2_file <- args[2]
@@ -180,6 +260,7 @@ sample_name <- args[4]
 db_fasta <- args[5]
 err_F_file <- args[6]
 err_R_file <- args[7]
+learn_errors <- args[8]
 
 library(dada2)
 library(Biostrings)
@@ -214,10 +295,17 @@ if (filt_out[1,2] == 0) {
     stop("No reads passed the filter!")
 }
 
-# Load pre-computed error rates
-cat("Loading pre-computed error rates...\n")
-err_F <- readRDS(err_F_file)
-err_R <- readRDS(err_R_file)
+# Get error rates (pre-computed or learned)
+if (learn_errors == "learn") {
+    cat("Learning error rates from input data (this may take a while)...\n")
+    err_F <- learnErrors(filt_r1, multithread = TRUE, verbose = TRUE)
+    err_R <- learnErrors(filt_r2, multithread = TRUE, verbose = TRUE)
+    cat("Error rate learning complete.\n")
+} else {
+    cat("Loading pre-computed error rates...\n")
+    err_F <- readRDS(err_F_file)
+    err_R <- readRDS(err_R_file)
+}
 
 # Dereplicate sink sample
 cat("Dereplicating sink sample...\n")

@@ -104,8 +104,8 @@ def create_filtered_design(design, selected_sources):
 # V4 extraction script path
 V4_EXTRACT_SCRIPT = SCRIPT_DIR / "scripts" / "get_v4_from_v34.py"
 
-def run_v4_extraction(r1_path, r2_path, output_dir, sample_name):
-    """Extract V4 region from V3-V4 amplicons using primer search."""
+def run_v4_extraction(r1_path, r2_path, output_dir, sample_name, amplicon="v34"):
+    """Extract V4 region from amplicons using primer search."""
     trimmed_dir = Path(output_dir) / "trimmed"
     trimmed_dir.mkdir(exist_ok=True)
 
@@ -129,7 +129,7 @@ def run_v4_extraction(r1_path, r2_path, output_dir, sample_name):
         shutil.copy2(Path(r2_path).resolve(), r2_link)
 
     # Run the V4 extraction script
-    cmd = f"cd {work_dir} && python3 {V4_EXTRACT_SCRIPT} {sample_name} {trimmed_dir} --mismatches 2"
+    cmd = f"cd {work_dir} && python3 {V4_EXTRACT_SCRIPT} {sample_name} {trimmed_dir} --mismatches 2 --amplicon {amplicon}"
 
     result = subprocess.run(
         f"source $(conda info --base)/etc/profile.d/conda.sh && conda activate dada2_mst && {cmd}",
@@ -148,8 +148,25 @@ def run_v4_extraction(r1_path, r2_path, output_dir, sample_name):
 
     return trimmed_r1, trimmed_r2, result
 
-def run_dada2_processing(r1_path, r2_path, output_dir, sample_name):
-    """Run DADA2 processing on sink sample using cached error rates."""
+def run_dada2_processing(r1_path, r2_path, output_dir, sample_name, learn_error_rates=False):
+    """Run DADA2 processing on sink sample."""
+    # Generate error rate loading/learning code based on option
+    if learn_error_rates:
+        error_rate_code = '''
+# Learn error rates from input data
+cat("Learning error rates from input data (this may take a while)...\\n")
+err_F <- learnErrors(filt_r1, multithread = TRUE, verbose = TRUE)
+err_R <- learnErrors(filt_r2, multithread = TRUE, verbose = TRUE)
+cat("Error rate learning complete.\\n")
+'''
+    else:
+        error_rate_code = f'''
+# Load pre-computed error rates
+cat("Loading pre-computed error rates...\\n")
+err_F <- readRDS("{ERR_F_FILE}")
+err_R <- readRDS("{ERR_R_FILE}")
+'''
+
     r_script = f'''
 library(dada2)
 library(Biostrings)
@@ -159,10 +176,6 @@ r2_file <- "{r2_path}"
 output_dir <- "{output_dir}"
 sample_name <- "{sample_name}"
 db_fasta <- "{DB_FASTA}"
-
-# Use pre-computed error rates
-err_F_file <- "{ERR_F_FILE}"
-err_R_file <- "{ERR_R_FILE}"
 
 cat("Processing paired-end reads...\\n")
 
@@ -193,10 +206,7 @@ if (filt_out[1,2] == 0) {{
     stop("No reads passed the filter!")
 }}
 
-# Load cached error rates
-cat("Loading cached error rates...\\n")
-err_F <- readRDS(err_F_file)
-err_R <- readRDS(err_R_file)
+{error_rate_code}
 
 cat("Dereplicating...\\n")
 derep_r1 <- derepFastq(filt_r1, verbose = FALSE)
@@ -488,6 +498,40 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
 
+        # Amplicon type selection
+        st.subheader("Amplicon Region")
+        amplicon_options = {
+            "v34": "V3-V4 (default)",
+            "v4": "V4 only",
+            "v45": "V4-V5"
+        }
+        selected_amplicon = st.selectbox(
+            "Select amplicon type",
+            options=list(amplicon_options.keys()),
+            format_func=lambda x: amplicon_options[x],
+            index=0,
+            help="V3-V4: primers in middle of R1. V4: primers at start. V4-V5: R2 contains V5 (limited support)."
+        )
+
+        if selected_amplicon == "v45":
+            st.warning("⚠️ V4-V5: R2 contains V5 region which may not match the V4 database well.")
+
+        st.divider()
+
+        # Error rate option
+        st.subheader("DADA2 Error Rates")
+        learn_error_rates = st.checkbox(
+            "Learn error rates from input data",
+            value=False,
+            help="If checked, DADA2 will learn error rates from your input files instead of using pre-computed rates. More accurate but significantly slower."
+        )
+        if learn_error_rates:
+            st.info("ℹ️ Learning error rates adds significant processing time but may improve accuracy, especially for data from different sequencing runs.")
+        else:
+            st.caption("Using pre-computed error rates (fast)")
+
+        st.divider()
+
         # Source selection
         st.subheader("Select Source Categories")
         design = load_design_file()
@@ -516,10 +560,6 @@ def main():
         else:
             st.error("❌ Database files missing")
 
-        # Error rate status
-        st.divider()
-        st.subheader("⚡ Error Rates")
-        st.success("✅ Pre-computed & ready")
 
     # Main content
     tab1, tab2 = st.tabs(["📤 Upload & Run", "ℹ️ Help"])
@@ -560,7 +600,7 @@ def main():
                         'R1': info['R1'].name if info['R1'] else 'Missing',
                         'R2': info['R2'].name if info['R2'] else 'Missing'
                     })
-                st.dataframe(pd.DataFrame(pair_data), use_container_width=True)
+                st.dataframe(pd.DataFrame(pair_data), width='stretch')
 
                 # Run analysis button
                 if st.button("🚀 Run SourceTracker2", type="primary", disabled=not selected_sources):
@@ -582,10 +622,10 @@ def main():
                             sample_name = info['sample_name']
                             status_text.text(f"Processing {sample_name} ({idx+1}/{total_samples})...")
 
-                            # Step 1: Extract V4 region from V3-V4 amplicons
+                            # Step 1: Extract V4 region from amplicons
                             with st.spinner(f"Extracting V4 region from {sample_name}..."):
                                 trimmed_r1, trimmed_r2, trim_result = run_v4_extraction(
-                                    info['R1'], info['R2'], output_dir, sample_name
+                                    info['R1'], info['R2'], output_dir, sample_name, selected_amplicon
                                 )
 
                             if trimmed_r1 is None:
@@ -594,10 +634,13 @@ def main():
                                 continue
 
                             # Step 2: Run DADA2 on trimmed files
-                            with st.spinner(f"Running DADA2 on {sample_name}..."):
+                            spinner_msg = f"Running DADA2 on {sample_name}..."
+                            if learn_error_rates:
+                                spinner_msg += " (learning error rates - this will be slow)"
+                            with st.spinner(spinner_msg):
                                 result = run_dada2_processing(
                                     trimmed_r1, trimmed_r2,
-                                    output_dir, sample_name
+                                    output_dir, sample_name, learn_error_rates
                                 )
 
                             if result.returncode != 0:
@@ -656,7 +699,7 @@ def main():
                                     for sample in proportions.index:
                                         st.plotly_chart(
                                             plot_source_contributions(proportions, sample),
-                                            use_container_width=True
+                                            width='stretch'
                                         )
                             else:
                                 st.error("SourceTracker2 failed:")
@@ -701,7 +744,7 @@ def main():
             'Category': list(source_info.keys()),
             'Sample Count': list(source_info.values())
         }).sort_values('Sample Count', ascending=False)
-        st.dataframe(source_df, use_container_width=True, hide_index=True)
+        st.dataframe(source_df, width='stretch', hide_index=True)
 
         st.subheader("Pipeline Steps")
         st.markdown("""
