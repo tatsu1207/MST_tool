@@ -141,12 +141,6 @@ else
 fi
 echo "========================================"
 
-if [ "$AMPLICON" = "v45" ]; then
-    echo ""
-    echo "NOTE: V4-V5 amplicons - V4 region will be extracted by finding 806R boundary (removes V5)."
-    echo ""
-fi
-
 if [ "$LEARN_ERRORS" = "learn" ]; then
     echo ""
     echo "NOTE: Learning error rates from input data. This will be significantly slower."

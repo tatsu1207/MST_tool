@@ -510,11 +510,8 @@ def main():
             options=list(amplicon_options.keys()),
             format_func=lambda x: amplicon_options[x],
             index=0,
-            help="V3-V4: primers in middle of R1. V4: primers at start. V4-V5: merged reads are ~410bp (limited support)."
+            help="V3-V4: primers in middle of R1. V4: primers at start. V4-V5: V4 extracted from V4-V5 reads."
         )
-
-        if selected_amplicon == "v45":
-            st.info("ℹ️ V4-V5: V4 region will be extracted by finding 806R boundary (removes V5).")
 
         st.divider()
 
