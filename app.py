@@ -102,7 +102,7 @@ def create_filtered_design(design, selected_sources):
     return filtered
 
 # V4 extraction script path
-V4_EXTRACT_SCRIPT = SCRIPT_DIR / "scripts" / "get_v4_from_v34.py"
+V4_EXTRACT_SCRIPT = SCRIPT_DIR / "scripts" / "get_v4_from_all.py"
 
 def run_v4_extraction(r1_path, r2_path, output_dir, sample_name, amplicon="v34"):
     """Extract V4 region from amplicons using primer search."""
@@ -510,11 +510,11 @@ def main():
             options=list(amplicon_options.keys()),
             format_func=lambda x: amplicon_options[x],
             index=0,
-            help="V3-V4: primers in middle of R1. V4: primers at start. V4-V5: R2 contains V5 (limited support)."
+            help="V3-V4: primers in middle of R1. V4: primers at start. V4-V5: merged reads are ~410bp (limited support)."
         )
 
         if selected_amplicon == "v45":
-            st.warning("⚠️ V4-V5: R2 contains V5 region which may not match the V4 database well.")
+            st.info("ℹ️ V4-V5: V4 region will be extracted by finding 806R boundary (removes V5).")
 
         st.divider()
 

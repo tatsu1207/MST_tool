@@ -1,6 +1,6 @@
 # SourceTracker2 MST Pipeline
 
-Microbial Source Tracking pipeline combining DADA2 ASV inference with SourceTracker2 Bayesian source estimation. Processes paired-end 16S rRNA amplicon data (V3-V4 or V4 region) and estimates the proportions of microbial communities originating from different source environments.
+Microbial Source Tracking pipeline combining DADA2 ASV inference with SourceTracker2 Bayesian source estimation. Processes paired-end 16S rRNA amplicon data (V3-V4, V4, or V4-V5 region) and estimates the proportions of microbial communities originating from different source environments.
 
 ## Setup
 
@@ -39,25 +39,43 @@ This creates a conda environment `dada2_mst` with all dependencies (DADA2, Sourc
 ```bash
 conda activate dada2_mst
 
-# All source categories
+# Basic usage (V3-V4 amplicons, all sources)
 ./run_sourcetracker.sh <fastq_dir> [output_dir]
 
-# Specific source categories only (available sources:human,cow,pig,duck,chicken,groundwater,river,seawater )
-./run_sourcetracker.sh <fastq_dir> [output_dir] "human,cow,pig,duck,chicken,river" 
+# Specify amplicon type
+./run_sourcetracker.sh <fastq_dir> <output_dir> all v34    # V3-V4 (default)
+./run_sourcetracker.sh <fastq_dir> <output_dir> all v4     # V4 only
+./run_sourcetracker.sh <fastq_dir> <output_dir> all v45    # V4-V5
+
+# Specific source categories (available: human,cow,pig,duck,chicken,groundwater,river,seawater)
+./run_sourcetracker.sh <fastq_dir> <output_dir> "human,cow,pig"
+
+# Learn error rates from input data (slower but more accurate)
+./run_sourcetracker.sh <fastq_dir> <output_dir> all v34 learn
 ```
 
 The `fastq_dir` should contain paired FASTQ files named `sample_R1.fastq.gz` / `sample_R2.fastq.gz` (or `sample_1.fastq.gz` / `sample_2.fastq.gz`).
 
 ### Input Data Requirements
 
-The pipeline accepts V3-V4 region paired-end MiSeq data. The reference database uses the V4 region, so V4 is extracted from your input reads.
+The pipeline accepts paired-end MiSeq data from multiple amplicon types. The reference database uses the V4 region, so V4 is extracted from your input reads.
 
-**Primer handling:**
-- **R1**: Must contain the V4 forward primer (515F: `GTGYCAGCMGCCGCGGTAA`). The script searches for this primer and keeps everything after it.
-- **R2**: Can have primers intact OR already removed:
-  - If 806R primer (`GACTACNVGGGTWTCTAAT`) is found → trimmed automatically
-  - If 806R primer is not found → assumes primers were already removed and uses R2 as-is
-  - R2 is truncated to 150bp in both cases
+**Supported amplicon types:**
+
+| Amplicon | Description | R1 Processing | R2 Processing |
+|----------|-------------|---------------|---------------|
+| **v34** | V3-V4 (~460bp) | Find 515F anywhere, keep after | Find 806R, trim, truncate 150bp |
+| **v4** | V4 only (~253bp) | Find 515F at 5' end, trim | Find 806R, trim, truncate 150bp |
+| **v45** | V4-V5 (~410bp) | Find 515F, trim; find 806R, truncate before | Find 926R, trim; find 806R_rc, keep after |
+
+**Primers used:**
+- 515F (V4 forward): `GTGYCAGCMGCCGCGGTAA` (19bp)
+- 806R (V4 reverse): `GACTACNVGGGTWTCTAAT` (19bp)
+- 926R (V5 reverse): `CCGYCAATTYMTTTRAGTTT` (20bp)
+
+**Auto-detection:** The pipeline automatically detects whether primers are present or already trimmed:
+- If primers found → trims them
+- If primers not found → assumes already trimmed, uses reads as-is
 
 This flexibility allows the tool to work with both raw amplicon data (primers intact) and pre-processed data (primers already trimmed).
 
@@ -71,7 +89,7 @@ Opens a web interface at http://localhost:8501 where you can upload FASTQ files,
 
 ## Pipeline Steps
 
-1. **V4 Extraction** - Extracts V4 region from V3-V4 amplicons using primer search (515F/806R). Handles both primer-intact and primer-trimmed input data.
+1. **V4 Extraction** - Extracts V4 region from amplicons using primer search. Supports V3-V4, V4, and V4-V5 input data. Auto-detects primer presence.
 2. **DADA2 Processing** - Filters, denoises, merges reads, and removes chimeras using pre-computed error rates
 3. **ASV Mapping** - Maps sink ASVs to the reference database by exact sequence match
 4. **Feature Table** - Creates combined source + sink abundance table with rare ASV filtering
@@ -97,6 +115,6 @@ The `db/` directory contains the reference source database:
 ├── app.py                # Streamlit application
 ├── requirements.txt      # Python pip dependencies
 ├── scripts/
-│   └── get_v4_from_v34.py  # V4 region extraction
+│   └── get_v4_from_all.py  # V4 region extraction (supports v34, v4, v45)
 └── db/                   # Reference database
 ```

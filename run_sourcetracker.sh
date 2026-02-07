@@ -36,7 +36,7 @@ if [ -z "$FASTQ_DIR" ]; then
     echo "  amplicon     - Amplicon type: v4, v34, v45 (optional, default: v34)"
     echo "                 v34 = V3-V4 region (primers in middle of R1)"
     echo "                 v4  = V4 only (primers at start of reads)"
-    echo "                 v45 = V4-V5 region (R2 contains V5, limited support)"
+    echo "                 v45 = V4-V5 region (V4 extracted from V4-V5 reads)"
     echo "  learn_errors - Error rate handling (optional, default: precomputed)"
     echo "                 precomputed = Use pre-computed error rates (fast)"
     echo "                 learn       = Learn from input data (slow but more accurate)"
@@ -143,7 +143,7 @@ echo "========================================"
 
 if [ "$AMPLICON" = "v45" ]; then
     echo ""
-    echo "WARNING: V4-V5 amplicons - R2 contains V5 region which may not match V4 database well."
+    echo "NOTE: V4-V5 amplicons - V4 region will be extracted by finding 806R boundary (removes V5)."
     echo ""
 fi
 
@@ -194,7 +194,7 @@ fi
 conda activate dada2_mst
 
 # V4 extraction script
-V4_EXTRACT_SCRIPT="$SCRIPT_DIR/scripts/get_v4_from_v34.py"
+V4_EXTRACT_SCRIPT="$SCRIPT_DIR/scripts/get_v4_from_all.py"
 
 TRIMMED_DIR="$(realpath "$OUTPUT_DIR")/trimmed"
 mkdir -p "$TRIMMED_DIR"
