@@ -27,6 +27,7 @@ ERR_R_FILE = SCRIPT_DIR / "db" / "err_R.rds"
 # Conda environment name
 CONDA_ENV = "dada2_mst"
 
+@st.cache_data
 def get_source_categories():
     """Auto-detect source categories from db.design."""
     design = pd.read_csv(DB_DESIGN, sep='\t', header=0, names=['SampleID', 'Group'])
@@ -44,14 +45,21 @@ def check_error_rates_exist():
     """Check if pre-computed error rates exist."""
     return ERR_F_FILE.exists() and ERR_R_FILE.exists()
 
+@st.cache_data
 def load_design_file():
     """Load and parse the design file."""
     design = pd.read_csv(DB_DESIGN, sep='\t', header=0, names=['SampleID', 'Group'])
     return design
 
-def get_source_counts(design):
+@st.cache_data
+def load_db_table():
+    """Load the database abundance table (cached for performance)."""
+    return pd.read_csv(DB_TABLE, index_col=0)
+
+@st.cache_data
+def get_source_counts(_design):
     """Get count of samples per source category."""
-    return design['Group'].value_counts().to_dict()
+    return _design['Group'].value_counts().to_dict()
 
 def save_uploaded_files(uploaded_files, temp_dir):
     """Save uploaded files to temporary directory."""
@@ -316,8 +324,8 @@ cat(sprintf("MAPPING_STATS:%d,%d,%d,%d\\n", mapped_count, nrow(sink_to_db), mapp
 
 def create_combined_table(sink_files, output_dir, selected_sources):
     """Create combined feature table for SourceTracker2."""
-    # Load database table
-    db_table = pd.read_csv(DB_TABLE, index_col=0)
+    # Load database table (cached)
+    db_table = load_db_table()
 
     # Load design and filter by selected sources
     design = load_design_file()

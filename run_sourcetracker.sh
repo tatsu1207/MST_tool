@@ -60,6 +60,11 @@ if [ ! -d "$FASTQ_DIR" ]; then
     exit 1
 fi
 
+# Detect CPU cores for parallel processing
+CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+# Use up to 8 cores for SourceTracker2, leave 1 free for system
+ST2_JOBS=$((CORES > 8 ? 8 : (CORES > 1 ? CORES - 1 : 1)))
+
 # Find and pair R1/R2 files using Python for robust pattern matching
 eval "$(python3 - "$FASTQ_DIR" << 'PAIR_SCRIPT'
 import sys, re, os
@@ -354,21 +359,17 @@ db_seqs <- readDNAStringSet(db_fasta)
 db_names <- names(db_seqs)
 db_sequences <- as.character(db_seqs)
 
-# Map sink ASVs to database ASVs by exact sequence match
+# Map sink ASVs to database ASVs by exact sequence match (vectorized for speed)
 cat("Mapping sink ASVs to database...\n")
+match_idx <- match(sink_seqs, db_sequences)
+db_asv_matched <- db_names[match_idx]  # NA where no match
+
 sink_to_db <- data.frame(
     sink_seq = sink_seqs,
     sink_count = sink_counts,
-    db_asv = NA_character_,
+    db_asv = db_asv_matched,
     stringsAsFactors = FALSE
 )
-
-for (i in seq_along(sink_seqs)) {
-    match_idx <- which(db_sequences == sink_seqs[i])
-    if (length(match_idx) > 0) {
-        sink_to_db$db_asv[i] <- db_names[match_idx[1]]
-    }
-}
 
 # Summary of mapping
 mapped_count <- sum(!is.na(sink_to_db$db_asv))
@@ -377,13 +378,14 @@ total_reads <- sum(sink_to_db$sink_count)
 cat(sprintf("Mapped ASVs: %d/%d (%.1f%%)\n", mapped_count, nrow(sink_to_db), 100*mapped_count/nrow(sink_to_db)))
 cat(sprintf("Mapped reads: %d/%d (%.1f%%)\n", mapped_reads, total_reads, 100*mapped_reads/total_reads))
 
-# Create sink abundance vector for database ASVs
-sink_abundance <- setNames(rep(0, length(db_names)), db_names)
-for (i in seq_len(nrow(sink_to_db))) {
-    if (!is.na(sink_to_db$db_asv[i])) {
-        asv_name <- sink_to_db$db_asv[i]
-        sink_abundance[asv_name] <- sink_abundance[asv_name] + sink_to_db$sink_count[i]
-    }
+# Create sink abundance vector for database ASVs (vectorized using tapply)
+mapped_mask <- !is.na(sink_to_db$db_asv)
+if (any(mapped_mask)) {
+    agg_counts <- tapply(sink_to_db$sink_count[mapped_mask], sink_to_db$db_asv[mapped_mask], sum)
+    sink_abundance <- setNames(rep(0, length(db_names)), db_names)
+    sink_abundance[names(agg_counts)] <- as.numeric(agg_counts)
+} else {
+    sink_abundance <- setNames(rep(0, length(db_names)), db_names)
 }
 
 # Save sink abundance
@@ -548,6 +550,7 @@ echo "[Step 6/6] Running SourceTracker2..."
 ST2_OUTPUT="$OUTPUT_DIR/sourcetracker2_results"
 rm -rf "$ST2_OUTPUT"
 
+echo "Using $ST2_JOBS parallel jobs (detected $CORES CPU cores)"
 sourcetracker2 \
     -i "$OUTPUT_DIR/combined_table.tsv" \
     -m "$OUTPUT_DIR/mapping.tsv" \
@@ -556,7 +559,7 @@ sourcetracker2 \
     --source_column_value source \
     --sink_column_value sink \
     --source_category_column Env \
-    --jobs 4
+    --jobs $ST2_JOBS
 
 echo ""
 echo "========================================"
