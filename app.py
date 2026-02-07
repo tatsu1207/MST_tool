@@ -35,7 +35,7 @@ def get_source_categories():
 SOURCE_CATEGORIES = get_source_categories()
 
 st.set_page_config(
-    page_title="SourceTracker2 GUI",
+    page_title="Fecal Pollution Indicator",
     page_icon="🧬",
     layout="wide"
 )
@@ -486,7 +486,7 @@ def plot_pie_chart(proportions, sample_name=None):
 
 # Main App
 def main():
-    st.title("🧬 SourceTracker2 GUI")
+    st.title("🧬 Fecal Pollution Indicator")
     st.markdown("**Microbial Source Tracking Analysis**")
 
     # Check error rates exist
