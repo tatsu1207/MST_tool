@@ -16,7 +16,8 @@ echo.
 REM Start the browser after a short delay (in background)
 start "" cmd /c "timeout /t 4 /nobreak >nul && start http://localhost:8501"
 
-REM Run the Streamlit app in WSL using the run_app.sh script
-wsl bash -l -c "cd /mnt/c/Users/User/Desktop/MST_tool && ./run_app.sh"
+REM Convert Windows path to WSL path and run the Streamlit app
+for /f "usebackq tokens=*" %%i in (`wsl wslpath -u "%~dp0"`) do set "WSL_DIR=%%i"
+wsl bash -l -c "cd '%WSL_DIR%' && ./run_app.sh"
 
 pause
